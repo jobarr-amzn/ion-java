@@ -23,6 +23,11 @@ import com.amazon.ion.util.IonTextUtils;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Instant;
+import java.time.temporal.ChronoField;
+import java.time.temporal.TemporalAccessor;
+import java.time.temporal.TemporalField;
+import java.time.temporal.UnsupportedTemporalTypeException;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.GregorianCalendar;
@@ -72,7 +77,7 @@ import java.util.GregorianCalendar;
  * @see #compareTo(Timestamp)
  */
 public final class Timestamp
-    implements Comparable<Timestamp>, Cloneable
+    implements Comparable<Timestamp>, Cloneable, TemporalAccessor
 {
     private static final boolean APPLY_OFFSET_YES = true;
     private static final boolean APPLY_OFFSET_NO = false;
@@ -131,10 +136,11 @@ public final class Timestamp
     private static final int FLAG_MINUTE    = 0x08;
     private static final int FLAG_SECOND    = 0x10;
 
+
     /**
      * The precision of the Timestamp.
      */
-    public static enum Precision {
+    public enum Precision {
         YEAR    (FLAG_YEAR),
         MONTH   (FLAG_YEAR | FLAG_MONTH),
         DAY     (FLAG_YEAR | FLAG_MONTH | FLAG_DAY),
@@ -210,6 +216,11 @@ public final class Timestamp
      * <code>null</code> means that the offset is unknown.
      */
     private Integer     _offset;
+
+    /**
+     * A cached value so that we do not recompute the instant
+     */
+    private Instant _instant;
 
                                                       //   jan, feb, mar, apr, may, jun, jul, aug, sep, oct, nov, dec
                                                       // the first 0 is to make these arrays 1 based (since month values are 1-12)
@@ -1547,6 +1558,34 @@ public final class Timestamp
         return new Date(millis);
     }
 
+    /**
+     * Converts the value of this Timestamp into an {@link Instant},
+     * representing the time in UTC.
+     * <p>
+     * This method will return the same result for all Timestamps representing
+     * the same point in time, regardless of the local offset.
+     * <p>
+     * Because {@link Date} instances are mutable, this method returns a
+     * new instance from each call.
+     *
+     * @return a new {@code Instant} instance
+     */
+    public Instant instantValue()
+    {
+        if (_instant == null) {
+            // It seems that the Instant generated here might be a more
+            // straightforward way of generating Date and Calendar
+            long epochSeconds = getDecimalMillis().movePointLeft(3).longValue();
+            long nanoAdjustment;
+            if (_fraction == null) {
+                nanoAdjustment = 0;
+            } else {
+                nanoAdjustment = _fraction.movePointRight(9).longValue();
+            }
+            _instant = Instant.ofEpochSecond(epochSeconds, nanoAdjustment);
+        }
+        return _instant;
+    }
 
     /**
      * Converts the value of this Timestamp as a {@link Calendar}, in its
@@ -1981,6 +2020,19 @@ public final class Timestamp
         return this._fraction;
     }
 
+
+    //=========================================================================
+    // TemporalAccessor methods
+    @Override
+    public boolean isSupported(TemporalField field) {
+        // Feel free to add support for more
+        return instantValue().isSupported(field);
+    }
+
+    @Override
+    public long getLong(TemporalField field) {
+        return instantValue().getLong(field);
+    }
 
     //=========================================================================
     // Modification methods
