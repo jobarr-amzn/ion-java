@@ -29,6 +29,7 @@ internal class IonManagedWriter_1_1_Test {
         val ion = "\$ion"
         val ion_1_1 = "\$ion_1_1"
         val ion_encoding = "\$ion_encoding"
+        val base_sid = SystemSymbols_1_1.size()
 
         // Some symbol tokens so that we don't have to keep declaring them
         private val fooSymbolToken = FakeSymbolToken("foo", -1)
@@ -155,7 +156,7 @@ internal class IonManagedWriter_1_1_Test {
     fun `write an encoding directive with a non-empty macro table`() {
         val expected = """
             $ion_1_1
-            $ion_encoding::((macro_table (macro null () "foo")))
+            (:$ion::add_macros (:: (macro null () "foo")))
         """.trimIndent()
 
         val actual = write {
@@ -169,7 +170,7 @@ internal class IonManagedWriter_1_1_Test {
     fun `write an e-expression by name`() {
         val expected = """
             $ion_1_1
-            $ion_encoding::((macro_table (macro a () "foo")))
+            (:$ion::add_macros (:: (macro a () "foo")))
             (:a)
         """.trimIndent()
 
@@ -185,7 +186,7 @@ internal class IonManagedWriter_1_1_Test {
     fun `write an e-expression by address`() {
         val expected = """
             $ion_1_1
-            $ion_encoding::((macro_table (macro null () "foo")))
+            (:$ion::add_macros (:: (macro null () "foo")))
             (:0)
         """.trimIndent()
 
@@ -209,7 +210,7 @@ internal class IonManagedWriter_1_1_Test {
 
         val expected = """
             $ion_1_1
-            $ion_encoding::((macro_table (macro null (a* b*) "foo")))
+            (:$ion::add_macros (:: (macro null (a* b*) "foo")))
             (:0 (::) (:: 1 2 3))
         """.trimIndent()
 
@@ -235,7 +236,7 @@ internal class IonManagedWriter_1_1_Test {
     fun `getOrAssignMacroAddress can add a system macro to the macro table`() {
         val expected = """
             $ion_1_1
-            $ion_encoding::((macro_table (export $ion::make_string)))
+            (:$ion::add_macros (:: (export $ion::make_string)))
         """.trimIndent()
 
         val actual = write {
@@ -249,7 +250,7 @@ internal class IonManagedWriter_1_1_Test {
     fun `when a system macro is shadowed, it should be written using the system e-exp syntax`() {
         val expected = """
             $ion_1_1
-            $ion_encoding::((macro_table (macro make_string () "make")))
+            (:$ion::add_macros (:: (macro make_string () "make")))
             (:make_string)
             (:$ion::make_string (:: "a" b))
         """.trimIndent()
@@ -277,7 +278,7 @@ internal class IonManagedWriter_1_1_Test {
     fun `it is possible to invoke a system macro using an alias`() {
         val expected = """
             $ion_1_1
-            $ion_encoding::((macro_table (export $ion::make_string foo)))
+            (:$ion::add_macros (:: (export $ion::make_string foo)))
             (:foo (:: "a" b))
         """.trimIndent()
 
@@ -296,8 +297,8 @@ internal class IonManagedWriter_1_1_Test {
     fun `write an encoding directive with a non-empty symbol table`() {
         val expected = """
             $ion_1_1
-            $ion_encoding::((symbol_table ["foo"]))
-            $1
+            (:$ion::add_symbols (:: "foo"))
+            $${base_sid + 1}
         """.trimIndent()
 
         val actual = write(symbolInliningStrategy = SymbolInliningStrategy.NEVER_INLINE) {
@@ -311,9 +312,9 @@ internal class IonManagedWriter_1_1_Test {
     fun `calling flush() causes the next encoding directive to append to a macro table`() {
         val expected = """
             $ion_1_1
-            $ion_encoding::((macro_table (macro null () "foo")))
+            (:$ion::add_macros (:: (macro null () "foo")))
             (:0)
-            $ion_encoding::((macro_table $ion_encoding (macro null () "bar")))
+            (:$ion::add_macros (:: (macro null () "bar")))
             (:0)
             (:1)
         """.trimIndent()
@@ -336,10 +337,10 @@ internal class IonManagedWriter_1_1_Test {
     fun `calling flush() causes the next encoding directive to append to the symbol table`() {
         val expected = """
             $ion_1_1
-            $ion_encoding::((symbol_table ["foo"]))
-            $1
-            $ion_encoding::((symbol_table $ion_encoding ["bar"]))
-            $2
+            (:$ion::add_symbols (:: "foo"))
+            $${base_sid + 1}
+            (:$ion::add_symbols (:: "bar"))
+            $${base_sid + 2}
         """.trimIndent()
 
         val actual = write(symbolInliningStrategy = SymbolInliningStrategy.NEVER_INLINE) {
@@ -355,9 +356,9 @@ internal class IonManagedWriter_1_1_Test {
     fun `calling finish() causes the next encoding directive to NOT append to a macro table`() {
         val expected = """
             $ion_1_1
-            $ion_encoding::((macro_table (macro null () "foo")))
+            (:$ion::add_macros (:: (macro null () "foo")))
             (:0)
-            $ion_encoding::((macro_table (macro null () "bar")))
+            (:$ion::set_macros (:: (macro null () "bar")))
             (:0)
         """.trimIndent()
 
@@ -376,10 +377,10 @@ internal class IonManagedWriter_1_1_Test {
     fun `calling finish() causes the next encoding directive to NOT append to the symbol table`() {
         val expected = """
             $ion_1_1
-            $ion_encoding::((symbol_table ["foo"]))
-            $1
-            $ion_encoding::((symbol_table ["bar"]))
-            $1
+            (:$ion::add_symbols (:: "foo"))
+            $${base_sid + 1}
+            (:$ion::set_symbols (:: "bar"))
+            $${base_sid + 1}
         """.trimIndent()
 
         val actual = write(symbolInliningStrategy = SymbolInliningStrategy.NEVER_INLINE) {
@@ -395,9 +396,9 @@ internal class IonManagedWriter_1_1_Test {
     fun `adding to the macro table should preserve existing symbols`() {
         val expected = """
             $ion_1_1
-            $ion_encoding::((symbol_table ["foo"]))
-            $1
-            $ion_encoding::((symbol_table $ion_encoding) (macro_table (macro null () "foo")))
+            (:$ion::add_symbols (:: "foo"))
+            $${base_sid + 1}
+            (:$ion::add_macros (:: (macro null () "foo")))
         """.trimIndent()
 
         val actual = write(symbolInliningStrategy = SymbolInliningStrategy.NEVER_INLINE) {
@@ -413,9 +414,9 @@ internal class IonManagedWriter_1_1_Test {
     fun `adding to the symbol table should preserve existing macros`() {
         val expected = """
             $ion_1_1
-            $ion_encoding::((macro_table (macro null () "foo")))
-            $ion_encoding::((symbol_table ["foo"]) (macro_table $ion_encoding))
-            $1
+            (:$ion::add_macros (:: (macro null () "foo")))
+            (:$ion::add_symbols (:: "foo"))
+            $${base_sid + 1}
             (:0)
         """.trimIndent()
 
@@ -691,7 +692,7 @@ internal class IonManagedWriter_1_1_Test {
     fun testWritingMacroDefinitions(description: String, macro: Macro, expectedSignatureAndBody: String) {
         val expected = """
             $ion_1_1
-            $ion_encoding::((macro_table (macro foo () "foo") (macro null () "bar") (macro null $expectedSignatureAndBody)))
+            (:$ion::add_macros (:: (macro foo () "foo") (macro null () "bar") (macro null $expectedSignatureAndBody)))
         """.trimIndent()
 
         val actual = write {
@@ -709,28 +710,29 @@ internal class IonManagedWriter_1_1_Test {
         // However, this should be held loosely.
         val expected = """
             $ion_1_1
-            $ion_encoding::(
-              (symbol_table ["foo","bar","baz"])
-              (macro_table
+            (:$ion::add_symbols
+              (:: "foo" "bar" "baz"))
+            (:$ion::add_macros
+              (::
                 (macro null () "foo")
-                (macro null (x) (.0 (%x) "bar" (..) (.. "baz"))))
+                (macro null (x) (.0 (%x) "bar" (..) (.. "baz")))
+              )
             )
-            $1
-            $2
-            $3
+            $${base_sid + 1}
+            $${base_sid + 2}
+            $${base_sid + 3}
             (:0)
             (:1)
-            $ion_encoding::(
-              (symbol_table
-                $ion_encoding
-                ["a","b","c"])
-              (macro_table
-                $ion_encoding
-                (macro null () "abc"))
+            (:$ion::add_symbols
+              (:: "a" "b" "c"))
+            (:$ion::add_macros
+              (::
+                (macro null () "abc")
+              )
             )
-            $4
-            $5
-            $6
+            $${base_sid + 4}
+            $${base_sid + 5}
+            $${base_sid + 6}
             (:2)
         """.trimIndent()
 
@@ -773,7 +775,7 @@ internal class IonManagedWriter_1_1_Test {
     fun `writeObject() should write something with a macro representation`() {
         val expected = """
             $ion_1_1
-            $ion_encoding::((macro_table (macro Point2D (x y) {x:(%x),y:(%y)})))
+            (:$ion::add_macros (:: (macro Point2D (x y) {x:(%x),y:(%y)})))
             (:Point2D 2 4)
         """.trimIndent()
 
@@ -808,7 +810,7 @@ internal class IonManagedWriter_1_1_Test {
     fun `writeObject() should write something with nested macro representation`() {
         val expected = """
             $ion_1_1
-            $ion_encoding::((macro_table (macro null (x*) (%x)) (macro Polygon (vertices+ compact_symbol::fill?) {vertices:[(%vertices)],fill:(.0 (%fill))}) (macro Point2D (x y) {x:(%x),y:(%y)})))
+            (:$ion::add_macros (:: (macro null (x*) (%x)) (macro Polygon (vertices+ compact_symbol::fill?) {vertices:[(%vertices)],fill:(.0 (%fill))}) (macro Point2D (x y) {x:(%x),y:(%y)})))
             (:Polygon (:: (:Point2D 0 0) (:Point2D 0 1) (:Point2D 1 1) (:Point2D 1 0)) Blue)
         """.trimIndent()
 

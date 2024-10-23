@@ -14,6 +14,7 @@ import java.io.OutputStream
 import java.math.BigDecimal
 import java.math.BigInteger
 import java.util.*
+import kotlin.collections.HashMap
 
 /**
  * A managed writer for Ion 1.1 that is generic over whether the raw encoding is text or binary.
@@ -113,8 +114,16 @@ internal class IonManagedWriter_1_1(
     // We take a slightly different approach here by handling the encoding context as a prior encoding context
     // plus a list of symbols added by the current encoding context.
 
+    private var resetContextSymbols = false
+    private var resetContextMacros = false
+
+    private val initialSymbolTable: HashMap<String, Int> = HashMap(
+        SystemSymbols_1_1.entries.associateBy({ it.text }, { it.id })
+    )
+
     /** The symbol table for the prior encoding context */
-    private var symbolTable: HashMap<String, Int> = HashMap()
+    private var symbolTable: HashMap<String, Int> = HashMap(initialSymbolTable)
+
     /** Symbols to be interned since the prior encoding context. */
     private var newSymbols: HashMap<String, Int> = LinkedHashMap() // Preserves insertion order.
 
@@ -262,15 +271,26 @@ internal class IonManagedWriter_1_1(
         //       in order to avoid writing a data stream with leaky context.
         if (depth != 0) throw IllegalStateException("Cannot reset the encoding context while stepped in any value.")
         symbolTable.clear()
+        symbolTable.putAll(initialSymbolTable)
         macroNames.clear()
         macrosById.clear()
         macroTable.clear()
         newMacros.clear()
+
+        resetContextSymbols = true
+        resetContextMacros = true
     }
 
     /** Helper function for writing encoding directives */
     private inline fun writeSystemSexp(content: PrivateIonRawWriter_1_1.() -> Unit) {
         systemData.stepInSExp(usingLengthPrefix = false)
+        systemData.content()
+        systemData.stepOut()
+    }
+
+    /** Helper function for writing encoding directives */
+    private inline fun writeSystemMacro(macro: SystemMacro, content: PrivateIonRawWriter_1_1.() -> Unit) {
+        systemData.stepInEExp(macro)
         systemData.content()
         systemData.stepOut()
     }
@@ -283,11 +303,8 @@ internal class IonManagedWriter_1_1(
     private fun writeEncodingDirective() {
         if (newSymbols.isEmpty() && newMacros.isEmpty()) return
 
-        systemData.writeAnnotations(SystemSymbols_1_1.ION_ENCODING)
-        writeSystemSexp {
-            writeSymbolTableClause()
-            writeMacroTableClause()
-        }
+        writeSymbolTableClause()
+        writeMacroTableClause()
 
         // NOTE: We don't update symbolTable until after the macro_table is written because
         //       the new symbols aren't available until _after_ this encoding directive.
@@ -304,27 +321,21 @@ internal class IonManagedWriter_1_1(
      */
     private fun writeSymbolTableClause() {
         val hasSymbolsToAdd = newSymbols.isNotEmpty()
-        val hasSymbolsToRetain = symbolTable.isNotEmpty()
-        if (!hasSymbolsToAdd && !hasSymbolsToRetain) return
+        if (!hasSymbolsToAdd) return
 
-        writeSystemSexp {
-            forceNoNewlines(true)
-            systemData.writeSymbol(SystemSymbols_1_1.SYMBOL_TABLE)
-
-            // Add previous symbol table
-            if (hasSymbolsToRetain) {
-                if (newSymbols.size > 0) forceNoNewlines(false)
-                writeSymbol(SystemSymbols_1_1.ION_ENCODING)
-            }
-
-            // Add new symbols
-            if (hasSymbolsToAdd) {
-                stepInList(usingLengthPrefix = false)
-                if (newSymbols.size <= MAX_SYMBOLS_IN_SINGLE_LINE_SYMBOL_TABLE) forceNoNewlines(true)
-                newSymbols.forEach { (text, _) -> writeString(text) }
-                stepOut()
-            }
-            forceNoNewlines(true)
+        // Add new symbols
+        val macro: SystemMacro
+        if (resetContextSymbols) {
+            macro = SystemMacro.SetSymbols
+            resetContextSymbols = false
+        } else {
+            macro = SystemMacro.AddSymbols
+        }
+        writeSystemMacro(macro) {
+            stepInExpressionGroup(usingLengthPrefix = false)
+            if (newSymbols.size <= MAX_SYMBOLS_IN_SINGLE_LINE_SYMBOL_TABLE) forceNoNewlines(true)
+            newSymbols.forEach { (text, _) -> writeString(text) }
+            stepOut()
         }
         systemData.forceNoNewlines(false)
     }
@@ -336,19 +347,21 @@ internal class IonManagedWriter_1_1(
      */
     private fun writeMacroTableClause() {
         val hasMacrosToAdd = newMacros.isNotEmpty()
-        val hasMacrosToRetain = macroTable.isNotEmpty()
-        if (!hasMacrosToAdd && !hasMacrosToRetain) return
+        if (!hasMacrosToAdd) return
 
-        writeSystemSexp {
-            forceNoNewlines(true)
-            writeSymbol(SystemSymbols_1_1.MACRO_TABLE)
-            if (newMacros.size > 0) forceNoNewlines(false)
-            if (hasMacrosToRetain) {
-                writeSymbol(SystemSymbols_1_1.ION_ENCODING)
-            }
+        val macro: SystemMacro
+        if (resetContextMacros) {
+            macro = SystemMacro.SetMacros
+            resetContextMacros = false
+        } else {
+            macro = SystemMacro.AddMacros
+        }
+        writeSystemMacro(macro) {
             forceNoNewlines(false)
+            stepInExpressionGroup(usingLengthPrefix = false)
             newMacros.forEach { (macro, address) ->
                 val name = macroNames[address]
+//                if (macro is TemplateMacro) writeMacroDefinition(name, macro)
                 when (macro) {
                     is TemplateMacro -> writeMacroDefinition(name, macro)
                     is SystemMacro -> {
@@ -359,7 +372,7 @@ internal class IonManagedWriter_1_1(
                     }
                 }
             }
-            forceNoNewlines(true)
+            stepOut()
         }
         systemData.forceNoNewlines(false)
     }
